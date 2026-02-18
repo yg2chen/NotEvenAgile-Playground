@@ -1,5 +1,5 @@
 
-obj-m += vpu_driver.o
+obj-m += edu_driver.o
 
 SRC := $(shell pwd)
 
@@ -10,6 +10,9 @@ modules_install:
 	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install 
 
 clean:
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) clean
+
+clear:
 	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
 	rm -f Module.markers Module.symvers modules.order
 	rm -rf .tmp_versions

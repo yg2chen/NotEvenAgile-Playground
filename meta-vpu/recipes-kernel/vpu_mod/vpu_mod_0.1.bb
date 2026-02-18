@@ -5,8 +5,9 @@ LICENSE = "CLOSED"
 
 inherit module
 SRC_URI = "file://Makefile \
-           file://vpu_driver.c "
+           file://edu_driver.c \
+           file://defines.h "
 
 S = "${WORKDIR}"
 
-RPROVIDES:${PN} += "kernel-module-vpu_driver"
+RPROVIDES:${PN} += "kernel-module-edu_driver"

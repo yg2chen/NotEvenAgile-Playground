@@ -1,1 +1,3 @@
-docker run --rm -it -v /home/myuser/mystuff:/workdir crops/poky --workdir=/workdir
+#!/usr/bin/sh
+
+docker run --rm -it -v "$(pwd):/workdir" crops/poky --workdir=/workdir

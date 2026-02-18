@@ -1,0 +1,119 @@
+Upstream-Status: Inappropriate [Custom]
+---
+diff --git a/hw/misc/edu.c b/hw/misc/edu.c
+index cece633e11..21b0f09066 100644
+--- a/hw/misc/edu.c
++++ b/hw/misc/edu.c
+@@ -27,13 +27,19 @@
+ #include "qemu/units.h"
+ #include "hw/pci/pci.h"
+ #include "hw/pci/msi.h"
++#include "hw/pci/msix.h"
+ #include "qemu/timer.h"
+ #include "qom/object.h"
+ #include "qemu/main-loop.h" /* iothread mutex */
+ #include "qemu/module.h"
+ #include "qapi/visitor.h"
++#include <stdio.h>
+ 
+ #define TYPE_PCI_EDU_DEVICE "edu"
++#define EDU_MSIX_VECTORS 4
++#define EDU_MSIX_TABLE_OFFSET 0x1000
++#define EDU_MSIX_PBA_OFFSET 0x2000
++
+ typedef struct EduState EduState;
+ DECLARE_INSTANCE_CHECKER(EduState, EDU,
+                          TYPE_PCI_EDU_DEVICE)
+@@ -77,20 +83,25 @@ struct EduState {
+     uint64_t dma_mask;
+ };
+ 
+-static bool edu_msi_enabled(EduState *edu)
+-{
+-    return msi_enabled(&edu->pdev);
++static bool edu_msix_enabled(EduState *edu){
++    return msix_enabled(&edu->pdev);
+ }
+ 
+ static void edu_raise_irq(EduState *edu, uint32_t val)
+ {
+     edu->irq_status |= val;
+-    if (edu->irq_status) {
+-        if (edu_msi_enabled(edu)) {
+-            msi_notify(&edu->pdev, 0);
+-        } else {
+-            pci_set_irq(&edu->pdev, 1);
++    fprintf(stderr, "[EDU DEBUG]: Raising IRQ. Status is now 0x%x\n", edu->irq_status);
++    if (edu_msix_enabled(edu)){
++        if(val & FACT_IRQ){
++            msix_notify(&edu->pdev, 0);
++        }else if(val & DMA_IRQ){
++            msix_notify(&edu->pdev, 1);
++        }else{
++            // safe catch
++            fprintf(stderr, "[EDU]: cautious value writing to interrupt reg.\n");
+         }
++    } else {
++        pci_set_irq(&edu->pdev, 1);
+     }
+ }
+ 
+@@ -98,7 +109,7 @@ static void edu_lower_irq(EduState *edu, uint32_t val)
+ {
+     edu->irq_status &= ~val;
+ 
+-    if (!edu->irq_status && !edu_msi_enabled(edu)) {
++    if (!edu->irq_status && !edu_msix_enabled(edu)) {
+         pci_set_irq(&edu->pdev, 0);
+     }
+ }
+@@ -369,13 +380,16 @@ static void *edu_fact_thread(void *opaque)
+ static void pci_edu_realize(PCIDevice *pdev, Error **errp)
+ {
+     EduState *edu = EDU(pdev);
+-    uint8_t *pci_conf = pdev->config;
++    // uint8_t *pci_conf = pdev->config;
+ 
+-    pci_config_set_interrupt_pin(pci_conf, 1);
++    // pci_config_set_interrupt_pin(pci_conf, 1);
+ 
+-    if (msi_init(pdev, 0, 1, true, false, errp)) {
+-        return;
+-    }
++    // if (msi_init(pdev, 0, 5, true, false, errp)) {
++    //     return;
++    // }
++
++    memory_region_init_io(&edu->mmio, OBJECT(edu), &edu_mmio_ops, edu,
++                    "edu-mmio", 8 * MiB);
+ 
+     timer_init_ms(&edu->dma_timer, QEMU_CLOCK_VIRTUAL, edu_dma_timer, edu);
+ 
+@@ -384,9 +398,15 @@ static void pci_edu_realize(PCIDevice *pdev, Error **errp)
+     qemu_thread_create(&edu->thread, "edu", edu_fact_thread,
+                        edu, QEMU_THREAD_JOINABLE);
+ 
+-    memory_region_init_io(&edu->mmio, OBJECT(edu), &edu_mmio_ops, edu,
+-                    "edu-mmio", 1 * MiB);
+     pci_register_bar(pdev, 0, PCI_BASE_ADDRESS_SPACE_MEMORY, &edu->mmio);
++
++    if (msix_init(pdev, EDU_MSIX_VECTORS, &edu->mmio, 0, EDU_MSIX_TABLE_OFFSET, &edu->mmio, 0, EDU_MSIX_PBA_OFFSET, 0, errp)) {
++        return;
++    }
++
++    for(int i = 0; i < 2; ++i){
++        msix_vector_use(pdev, i);
++    }
+ }
+ 
+ static void pci_edu_uninit(PCIDevice *pdev)
+@@ -403,7 +423,8 @@ static void pci_edu_uninit(PCIDevice *pdev)
+     qemu_mutex_destroy(&edu->thr_mutex);
+ 
+     timer_del(&edu->dma_timer);
+-    msi_uninit(pdev);
++    // msi_uninit(pdev);
++    msix_uninit(pdev, &edu->mmio, &edu->mmio);
+ }
+ 
+ static void edu_instance_init(Object *obj)

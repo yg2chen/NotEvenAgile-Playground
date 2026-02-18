@@ -1,3 +1,6 @@
 [submodule "poky"]
 	path = poky
 	url = git://git.yoctoproject.org/poky
+[submodule "hw/qemu"]
+	path = hw/qemu
+	url = https://github.com/qemu/qemu.git
