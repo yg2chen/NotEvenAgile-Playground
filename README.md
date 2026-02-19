@@ -1,16 +1,17 @@
 # VPU Playground
 Linux Kernel + Yocto + QEMU!
-A project about out-of-tree kernel module, yocto custom layer / image. Users can replace edu.c (hardware simulation) for your custom needs, updates in firmware, yocto scripts are possible to meet your custom hardware sim.
+A project about out-of-tree kernel module, yocto custom layer / image.  
+User can replace edu.c (hardware simulation) , kernel modules, yocto scripts  to meet your custom hardware sim.
 
 TBU: MLIR
 
 ## Intro
-I'm running: ArchLinux(developing) --> Ubuntu docker(building yocto) --> QEMU x86-64(validate kernel modules / hw simulations)
+I'm running: ArchLinux(developing) -> Ubuntu docker(building yocto) -> QEMU x86-64(validate kernel modules / hw simulations) \
 We will be using ubuntu docker to do the work. Since we are running within a container, the user previlege problems are inevitable, common error like TCP connecting error can be eliminated by using userspace TCP stack, aka. slirp.\
 ```$ runqemu core-image-vpu nographic slirp qemuparams="-device edu"```
 
 
-And also, since we are rocking out-of-tree kernel module within our own custom meta layer, dont forget to add kernel module autoload hooks in local.conf, `bitbake-layers add-layer ../../meta-vpu`; `bitbake-layers show-layers` to ensure the layer is added successfully.
+And also, since we are rocking out-of-tree kernel module within our own custom meta layer, dont forget to add kernel module autoload hooks in local.conf, `$ bitbake-layers add-layer ../../meta-vpu`.  Use `$ bitbake-layers show-layers` to ensure the layer is added successfully.
 
 
 ```
@@ -20,20 +21,58 @@ KERNEL_MODULE_AUTOLOAD += "edu_driver"
 
 
 ## Structure
-In this repo, the default provides DMA + MSI-X Interrupt + Zero Copy (Userspace memory remapping / remap_pfn_range) features. As for the driver part, it's still valid to use mmio operations to done the works, Zero Copy features please check out the user_test.c file. If user decided to working on a new simulated hardware don't forget to add / replace the original edu.c, add target to the config files, recompile, and link your Qemu version to yocto's `runqemu` command.
+In this repo, the default provides DMA + MSI-X Interrupt + Zero Copy (Userspace memory remapping / remap_pfn_range) features. As for the driver part, it's still valid to use mmio operations to do the works; Zero Copy features please check out the user_test.c file. If user decided to working on a new simulated hardware don't forget to add / replace the original edu.c, add target to the config files, recompile, and link your Qemu version to yocto's `runqemu` command; or simply just by patching, checkout recipe-devtools/.
 
 Refs. : 
 * [Adding a new Qemu PCI Device](https://youtu.be/MTUuymrutNw?si=DVX_yqLCji3KtuIq)
 
 ### Virtual Hardware Simulation
-MSI-X Support
+*MSI-X Support* \
+The qemu wil be spawning another thread to simulate the hardware behavior, the `EDU_STATUS_COMPUTING` will be the rein of thread. Shifting to another funtionalities is possible, timing issues may be possible to emerge.
+```
+// hw/misc/edu.c
+...
+static void *edu_fact_thread(void *opaque)
+{
+    ...
+    while (1) {
+        ...
+        while ((qatomic_read(&edu->status) & EDU_STATUS_COMPUTING) == 0 &&
+                        !edu->stopping) {
+            qemu_cond_wait(&edu->thr_cond, &edu->thr_mutex);
+        }
+        ...
+
+        while (val > 0) {
+            ret *= val--;
+        }
+
+        /*
+         * We should sleep for a random period here, so that students are
+         * forced to check the status properly.
+         */
+         ...
+    }
+
+    return NULL;
+}
+
+
+static void pci_edu_realize(PCIDevice *pdev, Error **errp)
+{
+...
+    qemu_thread_create(&edu->thread, "edu", edu_fact_thread,
+                       edu, QEMU_THREAD_JOINABLE);
+...
+}
+```
 
 
 ### Kernel Driver
 #### PCI Kernel Module
 *DMA + mmap + ioctl + MSI-X / Legacy Interrupt* \
 PCI device init, exit, probing, removing, etc. 
-* module_init 
+* module_init()
     * register driver with the kernel, pci_register_device()
     * no device / hardware / resource exists yet
     * handshake with **kernel**
@@ -107,7 +146,7 @@ Refs.:
 * [Linux Kernel Guide](https://docs.kernel.org/PCI/pci.html)
 
 ### Yocto Integration
-Custom meta layer with out-of-tree kernel module compilation, provides custom image configuration with kernel modules, custom programs, disk parition etc..
+Custom meta layer with out-of-tree kernel module compilation, provides custom image configuration with kernel modules, self programs, tailored disk parition etc....
 
 ```
 meta-vpu
@@ -145,4 +184,3 @@ TBU
 
 Refs.: 
 * [MLIR Standalone Dialect](https://github.com/llvm/llvm-project/tree/main/mlir/examples/standalonehttps://github.com/llvm/llvm-project/tree/main/mlir/examples/standalone)
-
