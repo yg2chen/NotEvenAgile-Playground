@@ -100,8 +100,6 @@ static irqreturn_t edu_dma_handler(int irq, void* dev_id)
     info.si_code = SI_QUEUE;
     info.si_int
     = edu_dev->dma_direction & DMA_EDU2RAM ? DMA_EDU2RAM : DMA_RAM2EDU;
-    pr_info(
-    "[%s] MSI-X DMA direction: %d.\n", DRIVER_NAME, edu_dev->dma_direction);
 
     task = get_pid_task(edu_dev->user_pid, PIDTYPE_PID);
     if (task) {
