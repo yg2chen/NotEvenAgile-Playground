@@ -36,7 +36,8 @@ struct edu_device {
     struct work_struct free_dma_work;
 };
 
-void free_dma_work_fn(struct work_struct* work) {
+void free_dma_work_fn(struct work_struct* work)
+{
     struct edu_device* edu_dev
     = container_of(work, struct edu_device, free_dma_work);
 
@@ -51,7 +52,8 @@ void free_dma_work_fn(struct work_struct* work) {
 // MSI-X
 
 // vector 0
-static irqreturn_t edu_status_handler(int irq, void* dev_id) {
+static irqreturn_t edu_status_handler(int irq, void* dev_id)
+{
     struct edu_device* edu_dev = dev_id;
 
     // Check:
@@ -74,7 +76,8 @@ static irqreturn_t edu_status_handler(int irq, void* dev_id) {
 }
 
 // vector 1
-static irqreturn_t edu_dma_handler(int irq, void* dev_id) {
+static irqreturn_t edu_dma_handler(int irq, void* dev_id)
+{
     struct edu_device* edu_dev = dev_id;
 
     // Check:
@@ -97,6 +100,8 @@ static irqreturn_t edu_dma_handler(int irq, void* dev_id) {
     info.si_code = SI_QUEUE;
     info.si_int
     = edu_dev->dma_direction & DMA_EDU2RAM ? DMA_EDU2RAM : DMA_RAM2EDU;
+    pr_info(
+    "[%s] MSI-X DMA direction: %d.\n", DRIVER_NAME, edu_dev->dma_direction);
 
     task = get_pid_task(edu_dev->user_pid, PIDTYPE_PID);
     if (task) {
@@ -107,7 +112,7 @@ static irqreturn_t edu_dma_handler(int irq, void* dev_id) {
         }
         put_task_struct(task);
     }
-    schedule_work(&edu_dev->free_dma_work);
+    // schedule_work(&edu_dev->free_dma_work);
 
     // Acknowledge Interrupt
     iowrite32(DMA_IRQ, edu_dev->mmio_base + EDU_IRQ_ACK);
@@ -116,7 +121,8 @@ static irqreturn_t edu_dma_handler(int irq, void* dev_id) {
 }
 
 // legacy irq fallback
-static irqreturn_t edu_irq_handler(int irq, void* dev_id) {
+static irqreturn_t edu_irq_handler(int irq, void* dev_id)
+{
     uint32_t status;
     struct edu_device* edu_dev = dev_id;
 
@@ -165,15 +171,75 @@ static irqreturn_t edu_irq_handler(int irq, void* dev_id) {
 }
 
 struct class* edu_class;
+static long edu_ioctl(struct file* filp, unsigned int cmd, unsigned long arg)
+{
+    struct edu_device* edu_dev = filp->private_data;
 
-static int edu_mmap(struct file* filp, struct vm_area_struct* vma) {
+    switch (cmd) {
+
+        case EDU_IOCTL_GET_DMA_ADDR: {
+            return copy_to_user((void __user*)arg,
+                                &edu_dev->dma_addr,
+                                sizeof(edu_dev->dma_addr))
+                 ? -EFAULT
+                 : 0;
+        }
+
+        case EDU_IOCTL_SET_DMA_DIR: {
+            uint32_t direction;
+            if (copy_from_user(&direction, (void __user*)arg, sizeof(direction))
+                < 0) {
+                pr_err("[%s] failed to fetch data from user.\n", DRIVER_NAME);
+                return -EFAULT;
+            }
+
+            edu_dev->dma_direction = direction;
+            return 0;
+        }
+
+        default:
+            pr_warn("[%s] misused cmd : %d.\n", DRIVER_NAME, cmd);
+    }
+
+    return -EINVAL;
+}
+
+// BAR pgoff: 0 ~ EDU_MEMORY_REGION >> PAGE_SHIFT (total 8 Mib)
+// DMA buffer pgoff: EDU_MEMORY_REGION ~ (total 4 Mib)
+static int edu_mmap(struct file* filp, struct vm_area_struct* vma)
+{
     struct edu_device* edu_dev = filp->private_data;
     size_t size = vma->vm_end - vma->vm_start;
+    unsigned long pfn;
 
-    unsigned long pfn = virt_to_phys(edu_dev->dma_buffer) >> PAGE_SHIFT;
+    if (vma->vm_pgoff == 0) {
+        // window 1: BAR
+        // note: fixed size
+        if (size != EDU_MEMORY_REGION) {
+            pr_err(
+            "[%s] mmap failed, va size is larger than DMA_BUFFER_SIZE.\n",
+            DRIVER_NAME);
+            return -EFAULT;
+        }
 
-    // map phys. into user
-    vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+        pfn = pci_resource_start(edu_dev->pdev, 0) >> PAGE_SHIFT;
+        vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+
+    } else if (vma->vm_pgoff == (EDU_MEMORY_REGION >> PAGE_SHIFT)) {
+        // window 2: DMA Buffer
+        // note: fixed size
+        if (size != (DMA_BUFFER_SIZE)) {
+            pr_err(
+            "[%s] mmap failed, va size is larger than DMA_BUFFER_SIZE.\n",
+            DRIVER_NAME);
+            return -EFAULT;
+        }
+
+        pfn = virt_to_phys(edu_dev->dma_buffer) >> PAGE_SHIFT;
+        // vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+    } else {
+        return -EINVAL;
+    }
 
     if (remap_pfn_range(vma, vma->vm_start, pfn, size, vma->vm_page_prot) < 0) {
         return -EAGAIN;
@@ -182,7 +248,8 @@ static int edu_mmap(struct file* filp, struct vm_area_struct* vma) {
     return 0;
 }
 
-static int edu_open(struct inode* inode, struct file* filp) {
+static int edu_open(struct inode* inode, struct file* filp)
+{
     struct edu_device* edu_dev;
 
     edu_dev = container_of(inode->i_cdev, struct edu_device, cdev);
@@ -197,7 +264,8 @@ static int edu_open(struct inode* inode, struct file* filp) {
 }
 
 static ssize_t
-edu_read(struct file* filp, char __user* buf, size_t count, loff_t* ppos) {
+edu_read(struct file* filp, char __user* buf, size_t count, loff_t* ppos)
+{
     struct edu_device* edu_dev;
     uint32_t value32;
 
@@ -250,10 +318,9 @@ edu_read(struct file* filp, char __user* buf, size_t count, loff_t* ppos) {
     return count;
 }
 
-static ssize_t edu_write(struct file* filp,
-                         const char __user* buf,
-                         size_t count,
-                         loff_t* ppos) {
+static ssize_t
+edu_write(struct file* filp, const char __user* buf, size_t count, loff_t* ppos)
+{
     struct edu_device* edu_dev;
     uint32_t value32 = 0;
     uint64_t value64 = 0;
@@ -291,11 +358,8 @@ static ssize_t edu_write(struct file* filp,
             edu_dev->dma_count = count == 4 ? value32 : value64;
             break;
         case EDU_DMA_CMD: {
-            struct device* dev = &edu_dev->pdev->dev;
+            // struct device* dev = &edu_dev->pdev->dev;
             uint64_t cmd = count == 4 ? value32 : value64;
-
-            void* buffer_addr = edu_dev->dma_buffer;
-            dma_addr_t dma_addr = edu_dev->dma_addr;
 
             // Set transfer count
             size_t size = edu_dev->dma_count;
@@ -315,13 +379,13 @@ static ssize_t edu_write(struct file* filp,
                 }
 
                 SET_DMA(edu_dev->dma_src_address, EDU_DMA_SRC_ADDR);
-                SET_DMA(dma_addr, EDU_DMA_DST_ADDR);
+                SET_DMA(edu_dev->dma_addr, EDU_DMA_DST_ADDR);
                 printk(KERN_INFO
                        "[%s] Start DMA: Direction: EDU to RAM, Source Address: "
                        "0x%llx, Destination Address: 0x%llx, count:%ld\n",
                        DRIVER_NAME,
                        edu_dev->dma_src_address,
-                       dma_addr,
+                       edu_dev->dma_addr,
                        size);
             } else {
                 // RAM to EDU
@@ -335,7 +399,7 @@ static ssize_t edu_write(struct file* filp,
                 }
 
                 // Copy user data to buffer
-                if (copy_from_user(buffer_addr,
+                if (copy_from_user(edu_dev->dma_buffer,
                                    (const void __user*)edu_dev->dma_src_address,
                                    edu_dev->dma_count)) {
                     printk(KERN_ERR "[%s] DMA_CMD: Failed to copy_from_user\n",
@@ -343,17 +407,17 @@ static ssize_t edu_write(struct file* filp,
                     return -EFAULT;
                 }
 
-                SET_DMA(dma_addr, EDU_DMA_SRC_ADDR);
+                SET_DMA(edu_dev->dma_addr, EDU_DMA_SRC_ADDR);
                 SET_DMA(edu_dev->dma_dst_address, EDU_DMA_DST_ADDR);
                 printk(KERN_INFO
                        "[%s] Start DMA: Direction: RAM to EDU, Source Address: "
                        "0x%llx, Destination Address: 0x%llx, count:%ld, "
                        "Content: %s\n",
                        DRIVER_NAME,
-                       dma_addr,
+                       edu_dev->dma_addr,
                        edu_dev->dma_dst_address,
                        size,
-                       (char*)buffer_addr);
+                       (char*)edu_dev->dma_buffer);
             }
 
             // Start DMA
@@ -375,9 +439,11 @@ static struct file_operations fops = {
 .write = edu_write,
 .open = edu_open,
 .mmap = edu_mmap,
+.unlocked_ioctl = edu_ioctl,
 };
 
-static int edu_probe(struct pci_dev* pdev, const struct pci_device_id* id) {
+static int edu_probe(struct pci_dev* pdev, const struct pci_device_id* id)
+{
     struct edu_device* edu_dev;
     int ret = 0;
     dev_t dev_num;
@@ -556,7 +622,8 @@ free_edu_device:
     return ret;
 }
 
-static void edu_remove(struct pci_dev* pdev) {
+static void edu_remove(struct pci_dev* pdev)
+{
     struct edu_device* edu_dev = pci_get_drvdata(pdev);
 
     // Free DMA Buffer
@@ -602,7 +669,8 @@ static struct pci_driver pci_driver = {
 .remove = edu_remove,
 };
 
-static int __init edu_init(void) {
+static int __init edu_init(void)
+{
     int ret;
     if ((ret = pci_register_driver(&pci_driver)) < 0) {
         printk(KERN_ERR "[%s] Init failed. \n", DRIVER_NAME);
@@ -613,7 +681,8 @@ static int __init edu_init(void) {
     return ret;
 }
 
-static void __exit edu_exit(void) {
+static void __exit edu_exit(void)
+{
     pci_unregister_driver(&pci_driver);
     printk(KERN_INFO "[%s] exited. \n", DRIVER_NAME);
 }
