@@ -3,7 +3,12 @@ Linux Kernel + Yocto + QEMU!
 A project about out-of-tree kernel module, yocto custom layer / image.  
 User can replace edu.c (hardware simulation) , kernel modules, yocto scripts  to meet your custom hardware sim.
 
+![Architecture](./images/arch.jpg)
+
 TBU: MLIR
+
+## Demo
+![demo](./images/demo.mkv)
 
 ## Intro
 I'm running: ArchLinux(developing) -> Ubuntu docker(building yocto) -> QEMU x86-64(validate kernel modules / hw simulations) \
