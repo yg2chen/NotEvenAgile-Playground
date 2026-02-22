@@ -8,7 +8,8 @@ User can replace edu.c (hardware simulation) , kernel modules, yocto scripts  to
 TBU: MLIR
 
 ## Demo
-![demo](./images/demo.mkv)
+https://github.com/user-attachments/assets/1d6f8f6c-feef-43ec-8067-316b1807d1ca
+
 
 ## Intro
 I'm running: ArchLinux(developing) -> Ubuntu docker(building yocto) -> QEMU x86-64(validate kernel modules / hw simulations) \
